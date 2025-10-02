@@ -4,15 +4,18 @@ import { off } from "process";
 import { DatabaseController } from "../config/db";
 import { YouTrackClient } from "../youtrack/youtrack-client";
 import { User } from "../models/db";
+import { TempYouTrackIssue } from "../models/youtrack";
+
 export class TelegramBot {
     private axiosClient: AxiosInstance;
     private baseUrl: string;
     private offset: number;
-    private userStates: Record<number, "idle" | "awaiting_url" | "awaiting_token" | "configured">;
+    private userStates: Record<number, "idle" | "awaiting_url" | "awaiting_token" | "configured" | "awaiting_project_selection" | "awaiting_title" | "awaiting_desc">;
     private users: Map<number, User>;
     private db: DatabaseController;
     private yt: YouTrackClient;
-    private tempUrls: Record<number, string>;
+    private tempData: Record<number, string>;
+    private tempIssueData: Record<number, TempYouTrackIssue>;
 
     constructor() {
         this.baseUrl = TELEGRAM_SERVER + "/bot" + TELEGRAM_TOKEN;
@@ -26,7 +29,8 @@ export class TelegramBot {
         this.userStates = {};
         this.db = new DatabaseController();
         this.yt = new YouTrackClient();
-        this.tempUrls = {};
+        this.tempData = {};
+        this.tempIssueData = {};
         this.users = new Map<number, User>();
     }
 
@@ -79,7 +83,61 @@ export class TelegramBot {
             }
             await this.handleMessage(chatId, text);
         }
+        
+        if (update.callback_query) {
+            await this.handleCallbackQuery(update.callback_query);
+        }
         return;
+    }
+
+    private async handleCallbackQuery(callbackQuery: any) {
+        const chatId = callbackQuery.message.chat.id;
+        const messageId = callbackQuery.message.message_id;
+        const data = callbackQuery.data;
+
+        if (data.startsWith('project_') && this.userStates[chatId] === 'awaiting_project_selection') {
+            const projectId = data.replace('project_', '');
+            
+            if (!this.tempIssueData[chatId]) {
+                this.tempIssueData[chatId] = {};
+            }
+            this.tempIssueData[chatId].projectId = projectId;
+
+            const user = this.users.get(chatId);
+            if (!user) return;
+
+            const projects = await this.yt.getProjects(user.youtrack_url, user.youtrack_token);
+            const selectedProject = projects.find(p => p.id === projectId);
+
+            await this.axiosClient.post(`/answerCallbackQuery`, {
+                callback_query_id: callbackQuery.id,
+                text: `✅ Selected: ${selectedProject?.name || projectId}`
+            });
+
+            await this.axiosClient.post(`/editMessageText`, {
+                chat_id: chatId,
+                message_id: messageId,
+                text: `✅ Project selected: **${selectedProject?.name || projectId}**`,
+                parse_mode: 'Markdown'
+            });
+
+            this.userStates[chatId] = "awaiting_title";
+            await this.sendMessage(chatId, "📝 Please insert the Issue title:");
+        }
+        else if (data === 'cancel_create') {
+            await this.axiosClient.post(`/answerCallbackQuery`, {
+                callback_query_id: callbackQuery.id
+            });
+
+            await this.axiosClient.post(`/editMessageText`, {
+                chat_id: chatId,
+                message_id: messageId,
+                text: "❌ Operation cancelled."
+            });
+
+            this.userStates[chatId] = "configured";
+            delete this.tempIssueData[chatId];
+        }
     }
 
     private async handleCommand(chatId: number, command: string) {
@@ -111,6 +169,8 @@ export class TelegramBot {
                 }
                 this.userStates[chatId] = "idle"
                 await this.db.removeUser(chatId);
+                this.users.delete(chatId);
+                await this.sendMessage(chatId, "✅ Configuration reset successfully!");
                 break;
             }
             case "/list": {
@@ -121,14 +181,103 @@ export class TelegramBot {
                 }
               
                 const projects = await this.yt.getProjects(user.youtrack_url, user.youtrack_token) 
-                let message = "📂 Your project\n\n";
+                let message = "📂 Your projects:\n\n";
                 for (const p of projects) {
                     message += `• ${p.id} — ${p.name}\n`;
                 }
 
                 await this.sendMessage(chatId, message);
                 break;
-                }   
+            }   
+            case "/create": {
+                const user = this.users.get(chatId);
+                if(this.userStates[chatId] != "configured" || !user) {
+                    await this.sendMessage(chatId, "❌ Your YouTrack connection isn't configured yet. To configure a connection use /setup");
+                    return;
+                }
+                
+                const projects = await this.yt.getProjects(user.youtrack_url, user.youtrack_token);
+
+                if (projects.length === 0) {
+                    await this.sendMessage(chatId, "❌ No projects found or error fetching projects.");
+                    return;
+                }
+
+                const keyboard = [];
+                
+                for (let i = 0; i < projects.length; i += 2) {
+                    const row = [];
+                    
+                    row.push({
+                        text: `📁 ${projects[i].name}`,
+                        callback_data: `project_${projects[i].id}`
+                    });
+                    
+                    if (i + 1 < projects.length) {
+                        row.push({
+                            text: `📁 ${projects[i + 1].name}`,
+                            callback_data: `project_${projects[i + 1].id}`
+                        });
+                    }
+                    
+                    keyboard.push(row);
+                }
+
+                keyboard.push([
+                    {
+                        text: "❌ Cancel",
+                        callback_data: "cancel_create"
+                    }
+                ]);
+
+                await this.axiosClient.post(`/sendMessage`, {
+                    chat_id: chatId,
+                    text: "🗂️ Select a project for the new issue:",
+                    reply_markup: {
+                        inline_keyboard: keyboard
+                    }
+                });
+
+                this.userStates[chatId] = "awaiting_project_selection";
+                
+                break;
+            }
+            case "/skip": {
+                if (this.userStates[chatId] === "awaiting_desc") {
+                    const user = this.users.get(chatId);
+                    if(!user || !this.tempIssueData[chatId]) {
+                        await this.sendMessage(chatId, "❌ There was an error while creating a new Issue, please try again.");
+                        this.userStates[chatId] = "configured";
+                        return;
+                    }
+
+                    const issue = {
+                        project: {id: this.tempIssueData[chatId].projectId! },
+                        summary: this.tempIssueData[chatId].summary!,
+                        description: undefined
+                    };
+
+                    const createdIssue = await this.yt.createIssue(user.youtrack_url, user.youtrack_token, issue);
+                    
+                    if(!createdIssue) {
+                        await this.sendMessage(chatId, "❌ There was an error while creating a new Issue, please try again.");
+                        this.userStates[chatId] = "configured";
+                        delete this.tempIssueData[chatId];
+                        return;
+                    }
+                
+                    await this.sendMessage(
+                        chatId, 
+                        `✅ Issue created without description!`,
+                    );
+                    
+                    this.userStates[chatId] = "configured";
+                    delete this.tempIssueData[chatId];
+                } else {
+                    await this.sendMessage(chatId, "❌ This command can only be used when adding a description.");
+                }
+                break;
+            }
             default:
                 await this.sendMessage(chatId, "Unknown command, use /help to see available commands.");
         }
@@ -141,19 +290,19 @@ export class TelegramBot {
         if (url.endsWith("/")) {
             url = url.slice(0, -1);
         }
-        return url +"/api";
+        return url + "/api";
     }
 
     private async handleMessage(chatId: number, text: string) {
         const state = this.userStates[chatId] || "idle";
 
         if (state === "awaiting_url") {
-            this.tempUrls[chatId] = this.fixUrl(text);
+            this.tempData[chatId] = this.fixUrl(text);
             this.userStates[chatId] = "awaiting_token";
             await this.sendMessage(chatId, "Perfect! Now insert your YouTrack Token:");
         } else if (state === "awaiting_token") {
             const token = text; 
-            let url = this.tempUrls[chatId];
+            let url = this.tempData[chatId];
             if(!await this.yt.validateToken(url, token)) {
                 await this.sendMessage(chatId, "❌ Invalid YouTrack URL or Token. Please try /setup again.");
                 this.userStates[chatId] = "idle";
@@ -161,7 +310,7 @@ export class TelegramBot {
             }
 
             const user = await this.db.addUser(chatId, url, token);
-            delete this.tempUrls[chatId];
+            delete this.tempData[chatId];
             if(!user) {
                 await this.sendMessage(chatId, "❌ There was an error saving your configuration. Please try /setup again.");
                 this.userStates[chatId] = "idle";          
@@ -170,6 +319,54 @@ export class TelegramBot {
             this.users.set(chatId, user);
             this.userStates[chatId] = "configured";
             await this.sendMessage(chatId, "✅ Configuration has been completed successfully!");
+        } else if (state == "awaiting_title") {
+            const title = text.trim();
+            
+            if (title.length === 0) {
+                await this.sendMessage(chatId, "❌ Title cannot be empty. Please try again:");
+                return;
+            }
+            
+            if (!this.tempIssueData[chatId]) {
+                this.tempIssueData[chatId] = {};
+            }
+            this.tempIssueData[chatId].summary = title;
+            
+            this.userStates[chatId] = "awaiting_desc";
+            await this.sendMessage(chatId, "📄 Please insert the Issue description (or send /skip to create without description):");
+        } else if (state == "awaiting_desc") {
+            const user = this.users.get(chatId);
+            if(!user || !this.tempIssueData[chatId]) {
+                await this.sendMessage(chatId, "❌ There was an error while creating a new Issue, please try again.");
+                this.userStates[chatId] = "configured";
+                return;
+            }
+            
+            const description = text.trim();
+            this.tempIssueData[chatId].description = description.length > 0 ? description : undefined;
+
+            const issue = {
+                project: {id: this.tempIssueData[chatId].projectId!},
+                summary: this.tempIssueData[chatId].summary!,
+                description: this.tempIssueData[chatId].description
+            };
+
+            const createdIssue = await this.yt.createIssue(user.youtrack_url, user.youtrack_token, issue);
+            
+            if(!createdIssue) {
+                await this.sendMessage(chatId, "❌ There was an error while creating a new Issue, please try again.");
+                this.userStates[chatId] = "configured";
+                delete this.tempIssueData[chatId];
+                return;
+            }
+
+            await this.sendMessage(
+                chatId, 
+                `✅ Issue created successfully! `,
+            );
+            
+            this.userStates[chatId] = "configured";
+            delete this.tempIssueData[chatId];
         }
     }
 
@@ -199,7 +396,7 @@ export class TelegramBot {
                 for (const update of updates) {
                     console.log("Received update:", update);
                     this.offset = update.update_id + 1;
-                    this.handleUpdate(update);
+                    await this.handleUpdate(update);
                 }
             } catch (error) {
                 console.error("Error in Telegram polling loop:", error);
