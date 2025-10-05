@@ -2,6 +2,7 @@ import { TelegramAPI } from "./telegram-api";
 import { StateManager } from "./state-manager";
 import { DatabaseController } from "../config/db";
 import { YouTrackClient } from "../youtrack/youtrack-client";
+import { NotificationService } from "../services/notification-service";
 
 export class CommandHandler {
     private api: TelegramAPI;
@@ -16,7 +17,7 @@ export class CommandHandler {
         this.yt = yt;
     }
 
-    async handleCommand(chatId: number, command: string) {
+    public async handleCommand(chatId: number, command: string) {
         switch (command.split(" ")[0]) {
             case "/start":
                 await this.handleStart(chatId);

@@ -2,31 +2,44 @@ import { TelegramAPI } from "./telegram-api";
 import { StateManager } from "./state-manager";
 import { DatabaseController } from "../config/db";
 import { YouTrackClient } from "../youtrack/youtrack-client";
+import { NotificationService } from "../services/notification-service";
 
 export class MessageHandler {
     private api: TelegramAPI;
     private stateManager: StateManager;
     private db: DatabaseController;
     private yt: YouTrackClient;
+    private notificationService: NotificationService;
 
-    constructor(api: TelegramAPI, stateManager: StateManager, db: DatabaseController, yt: YouTrackClient) {
+    constructor(api: TelegramAPI, stateManager: StateManager, db: DatabaseController, yt: YouTrackClient, notificationService: NotificationService) {
         this.api = api;
         this.stateManager = stateManager;
         this.db = db;
         this.yt = yt;
+        this.notificationService = notificationService;
     }
 
-    async handleMessage(chatId: number, text: string) {
+    public async handleMessage(chatId: number, text: string) {
         const state = this.stateManager.getState(chatId);
 
-        if (state === "awaiting_url") {
-            await this.handleAwaitingUrl(chatId, text);
-        } else if (state === "awaiting_token") {
-            await this.handleAwaitingToken(chatId, text);
-        } else if (state == "awaiting_title") {
-            await this.handleAwaitingTitle(chatId, text);
-        } else if (state == "awaiting_desc") {
-            await this.handleAwaitingDesc(chatId, text);
+        switch (state) {
+            case "awaiting_url":
+                await this.handleAwaitingUrl(chatId, text);
+                break;
+            case "awaiting_token":
+                await this.handleAwaitingToken(chatId, text);
+                break;
+            case "awaiting_title":
+                await this.handleAwaitingTitle(chatId, text);
+                break;
+            case "awaiting_desc":
+                await this.handleAwaitingDesc(chatId, text);
+                break;
+            default:
+                await this.api.sendMessage(chatId, 
+                    "❌ I'm not expecting any message right now. Use /help to see the available commands."
+                );
+                break;
         }
     }
 
@@ -64,9 +77,9 @@ export class MessageHandler {
             this.stateManager.setState(chatId, "idle");          
             return;
         }
-        
+
         this.stateManager.setUser(chatId, user);
-        this.stateManager.setState(chatId, "configured");
+        this.notificationService.startPollingForUser(chatId);
         await this.api.sendMessage(chatId, "✅ Configuration has been completed successfully!");
     }
 

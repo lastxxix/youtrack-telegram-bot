@@ -6,6 +6,7 @@ import { StateManager } from "./state-manager";
 import { CommandHandler } from "./command-handler";
 import { MessageHandler } from "./message-handler";
 import { CallbackHandler } from "./callback-handler";
+import { NotificationService } from "../services/notification-service";
 
 export class TelegramBot {
     private api: TelegramAPI;
@@ -16,6 +17,7 @@ export class TelegramBot {
     private commandHandler: CommandHandler;
     private messageHandler: MessageHandler;
     private callbackHandler: CallbackHandler;
+    private notificationService: NotificationService;
 
     constructor() {
         this.api = new TelegramAPI();
@@ -23,9 +25,11 @@ export class TelegramBot {
         this.stateManager = new StateManager();
         this.db = new DatabaseController();
         this.yt = new YouTrackClient();
+        this.notificationService = new NotificationService(this.api, this.stateManager, this.yt);
         this.commandHandler = new CommandHandler(this.api, this.stateManager, this.db, this.yt);
-        this.messageHandler = new MessageHandler(this.api, this.stateManager, this.db, this.yt);
+        this.messageHandler = new MessageHandler(this.api, this.stateManager, this.db, this.yt, this.notificationService);
         this.callbackHandler = new CallbackHandler(this.api, this.stateManager, this.yt);
+        
     }
 
     private async initialize() {
@@ -35,8 +39,9 @@ export class TelegramBot {
         const dbUsers = await this.db.getUsers();
         for (const user of dbUsers) {
             this.stateManager.setUser(user.chat_id, user);
+            this.notificationService.startPollingForUser(user.chat_id);
         }
-        console.log("Retrieved existing users!", this.stateManager.getAllUsers());
+        console.log("Retrieved", this.stateManager.getAllUsers().size, "existing users!");
     }
 
     private async handleUpdate(update: any) {
@@ -64,7 +69,7 @@ export class TelegramBot {
             try {
                 const updates = await this.api.getUpdates(this.offset);
                 for (const update of updates) {
-                    console.log("Received update:", update);
+                    //console.log("Received update:", update);
                     this.offset = update.update_id + 1;
                     await this.handleUpdate(update);
                 }

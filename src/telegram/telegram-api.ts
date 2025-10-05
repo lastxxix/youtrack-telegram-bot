@@ -15,7 +15,7 @@ export class TelegramAPI {
         });
     }
 
-    async getUpdates(offset: number) {
+    public async getUpdates(offset: number) {
         try {
             const response = await this.axiosClient.get(`/getUpdates?timeout=30&offset=${offset}`);
             if (response.status === 200 && response.data.ok) {      
@@ -27,7 +27,7 @@ export class TelegramAPI {
         }
     }
 
-    async sendMessage(chatId: number, text: string, parse_mode?: string) {
+    public async sendMessage(chatId: number, text: string, parse_mode?: string) {
         try {
             const response = await this.axiosClient.post(`/sendMessage`, {
                 chat_id: chatId,
@@ -42,7 +42,7 @@ export class TelegramAPI {
         }
     }
 
-    async sendMessageWithKeyboard(chatId: number, text: string, keyboard: any) {
+    public async sendMessageWithKeyboard(chatId: number, text: string, keyboard: any) {
         try {
             const response = await this.axiosClient.post(`/sendMessage`, {
                 chat_id: chatId,
@@ -59,7 +59,7 @@ export class TelegramAPI {
         }
     }
 
-    async editMessageText(chatId: number, messageId: number, text: string, parse_mode?: string) {
+    public async editMessageText(chatId: number, messageId: number, text: string, parse_mode?: string) {
         try {
             await this.axiosClient.post(`/editMessageText`, {
                 chat_id: chatId,
@@ -72,7 +72,7 @@ export class TelegramAPI {
         }
     }
 
-    async answerCallbackQuery(callbackQueryId: string, text?: string) {
+    public async answerCallbackQuery(callbackQueryId: string, text?: string) {
         try {
             await this.axiosClient.post(`/answerCallbackQuery`, {
                 callback_query_id: callbackQueryId,
@@ -83,7 +83,7 @@ export class TelegramAPI {
         }
     }
 
-    async setCommands(commands: any[]): Promise<boolean> {
+    public async setCommands(commands: any[]): Promise<boolean> {
         try {
             const response = await this.axiosClient.post(`/setMyCommands`, {
                 commands: commands

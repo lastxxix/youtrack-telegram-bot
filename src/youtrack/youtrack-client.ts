@@ -1,7 +1,9 @@
 import dotenv from "dotenv";
 
 import axios, { AxiosError, AxiosInstance } from "axios";
-import { YouTrackIssue, YouTrackNotification, YouTrackProject } from "../models/youtrack";
+import { YouTrackIssue, YouTrackNotification, YouTrackNotificationResponse, YouTrackProject } from "../models/youtrack";
+import { gunzipSync } from "zlib";
+import { time } from "console";
 
 export class YouTrackClient {
     private axiosClient: AxiosInstance | null = null;
@@ -51,12 +53,90 @@ export class YouTrackClient {
         return [];
     }
 
-    public async getNotifications(baseUrl: string, token: string): Promise<YouTrackNotification | undefined>{
+    private getFieldValue(fields: any[], fieldName: string): string | undefined {
+        const fieldMap: { [key: string]: string[] } = {
+            'State': ['Stato', 'State'],
+            'Priority': ['Priorità', 'Priority'],
+            'Assignee': ['Assegnatario', 'Assignee']
+        };
+
+        const possibleNames = fieldMap[fieldName] || [fieldName];
+        
+        for (const name of possibleNames) {
+            const field = fields?.find((f: any) => f.name === name);
+            if (field) return field.value;
+        }
+        
+        return undefined;
+    }
+
+    private parseNotifications(notifications: any[], since?: number): YouTrackNotification[] {
+        const parsed: YouTrackNotification[] = [];
+        const sinceTime = since ? new Date(since).getTime() : 0;
+
+        for (const notification of notifications) {
+            try {
+                const buffer = Buffer.from(notification.metadata, "base64");
+                const decompressed = gunzipSync(buffer).toString("utf-8");
+                const metadata = JSON.parse(decompressed);
+
+                const issue = metadata.issue;
+                const change = metadata.change;
+                const events = change?.events || [];
+                const timestamp = change?.startTimestamp ?? change?.endTimestamp;
+                
+                if (sinceTime && timestamp < sinceTime) continue;
+
+                const state = this.getFieldValue(issue.fields, 'State');
+                const priority = this.getFieldValue(issue.fields, 'Priority');
+                const assignee = this.getFieldValue(issue.fields, 'Assignee');
+
+                const commentEvent = events.find((e: any) => 
+                    e.category === "COMMENT" && e.addedValues?.length > 0
+                );
+                const commentCreatedEvent = events.find((e: any) => 
+                    e.category === "COMMENTS" && e.name === "comment created"
+                );
+                
+                const comment = commentEvent?.addedValues?.[0]?.name;
+
+                let eventType = metadata.header || "Unknown";
+                let category = "";
+
+                if (comment || commentCreatedEvent) {
+                    eventType = "Comment Added";
+                    category = "COMMENT";
+                } else if (events.some((e: any) => e.name === "created" && e.category !== "COMMENTS")) {
+                    eventType = "Issue Created";
+                    category = "ISSUE";
+                }
+
+                parsed.push({
+                    issueId: issue.id,
+                    project: issue.project || "Unknown",
+                    summary: issue.summary || "No summary",
+                    description: issue.description,
+                    eventType,
+                    timestamp: timestamp,
+                    category,
+                    comment: comment || undefined,
+                    state: state || undefined,
+                    priority: priority || undefined,
+                    assignee: assignee !== "Non assegnato" ? assignee : undefined,
+                });
+            } catch (error) {
+                console.error("Error while parsing a notification:", error);
+            }
+        }
+        return parsed;
+    }
+
+    public async getNotifications(baseUrl: string, token: string, since?: number): Promise<YouTrackNotification[] | undefined>{
         try {
             const client = this.initializeClient(baseUrl, token);
-            const response = await client.get<YouTrackNotification>(`/notifications?fields=id,content,metadata&all=true`);
+            const response = await client.get<YouTrackNotificationResponse[]>(`/notifications?fields=id,content,metadata`);
             if (response.status === 200) {
-                return response.data;
+                return this.parseNotifications(response.data, since);
             }
         } catch (error) {
             if (axios.isAxiosError(error)) {
