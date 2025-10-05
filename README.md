@@ -4,6 +4,7 @@ A Telegram bot that sends real-time notifications from YouTrack directly to your
 
 ## Features
 
+- 🆕 Create new issues directly from Telegram (`/create`)
 - 🔔 Real-time notifications for YouTrack issues
 - 💬 Comment updates
 - 🎯 Per-user configuration
@@ -81,6 +82,13 @@ DB_PATH=""          # default: ./database.sqlite
 3. Enter your YouTrack permanent token.
 4. The bot will validate your credentials.
 5. Start receiving notifications!
+
+### Issue Creation Flow
+
+1. Send `/create` to the bot.
+2. Enter the Issue title.
+3. Optionally, enter a description or use `/skip`.
+4. The bot creates a new issue in YouTrack with the provided details.
 
 ## How It Works
 
