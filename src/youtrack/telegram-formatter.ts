@@ -13,7 +13,7 @@ export class TelegramFormatter {
         }  
         
         if (notification.comment) {
-            message += `💬 Comment:\n_${this.escapeMarkdown(notification.comment).trim()}_\n`;
+            message += `💬 Comment:\n_${notification.comment.trim()}_\n`;
         }
         
         if (notification.state) {
@@ -39,10 +39,6 @@ export class TelegramFormatter {
             'ISSUE': '🆕',
         };
         return emojiMap[category] || '📌';
-    }
-
-    private escapeMarkdown(text: string): string {
-        return text.replace(/([_*\[\]()~`>#+\-=|{}.!])/g, '\\$1');
     }
 
     public formatNotifications(notifications: YouTrackNotification[]): string[] {

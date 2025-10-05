@@ -38,6 +38,11 @@ export class TelegramBot {
         console.log("Initializing Telegram client...");
         const dbUsers = await this.db.getUsers();
         for (const user of dbUsers) {
+            if(!await this.yt.validateToken(user.youtrack_url, user.youtrack_token)){
+                await this.db.removeUser(user.chat_id);
+                console.log("User", user.chat_id, "has not a valid token, removing from db...");
+                continue;
+            } 
             this.stateManager.setUser(user.chat_id, user);
             this.notificationService.startPollingForUser(user.chat_id);
         }
