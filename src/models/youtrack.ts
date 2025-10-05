@@ -16,3 +16,10 @@ export interface TempYouTrackIssue {
     summary?: string;
     description?: string;
 }
+
+export interface YouTrackNotification {
+    id: string;
+    $type: string;
+    metadata: string;
+    content: string;
+}

@@ -1,7 +1,7 @@
 import dotenv from "dotenv";
 
 import axios, { AxiosError, AxiosInstance } from "axios";
-import { YouTrackIssue, YouTrackProject } from "../models/youtrack";
+import { YouTrackIssue, YouTrackNotification, YouTrackProject } from "../models/youtrack";
 
 export class YouTrackClient {
     private axiosClient: AxiosInstance | null = null;
@@ -49,6 +49,24 @@ export class YouTrackClient {
         
         }
         return [];
+    }
+
+    public async getNotifications(baseUrl: string, token: string): Promise<YouTrackNotification | undefined>{
+        try {
+            const client = this.initializeClient(baseUrl, token);
+            const response = await client.get<YouTrackNotification>(`/notifications?fields=id,content,metadata&all=true`);
+            if (response.status === 200) {
+                return response.data;
+            }
+        } catch (error) {
+            if (axios.isAxiosError(error)) {
+                const axiosError = error as AxiosError;
+                console.error("YouTrack API Error:", axiosError.response?.data || axiosError.message);
+            } else {
+                console.error("Unexpected Error:", error);
+            }
+            return undefined;
+        }
     }
 
     public async createIssue(baseUrl: string, token: string, issue: YouTrackIssue): Promise<boolean> {
