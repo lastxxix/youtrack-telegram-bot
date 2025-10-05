@@ -37,6 +37,9 @@ export class CommandHandler {
             case "/skip":
                 await this.handleSkip(chatId);
                 break;
+            case "/help":
+                await this.handleHelp(chatId);
+                break;
             default:
                 await this.api.sendMessage(chatId, "Unknown command, use /help to see available commands.");
         }
@@ -173,5 +176,46 @@ export class CommandHandler {
         } else {
             await this.api.sendMessage(chatId, "❌ This command can only be used when adding a description.");
         }
+    }
+    private async handleHelp(chatId: number) {
+        const state = this.stateManager.getState(chatId);
+        const isConfigured = state === "configured";
+
+        let helpMessage = `📚 *YouTrack Telegram Bot - Help*\n\n`;
+        
+        if (!isConfigured) {
+            helpMessage += `🔴 *You are not configured yet*\n\n`;
+            helpMessage += `*Available Commands:*\n\n`;
+            helpMessage += `🚀 /start - Welcome message and introduction\n`;
+            helpMessage += `⚙️ /setup - Configure your YouTrack connection\n`;
+            helpMessage += `❓ /help - Show this help message\n\n`;
+            helpMessage += `*Getting Started:*\n`;
+            helpMessage += `1. Use /setup to begin configuration\n`;
+            helpMessage += `2. Enter your YouTrack instance URL\n`;
+            helpMessage += `3. Enter your YouTrack permanent token\n`;
+            helpMessage += `4. Start receiving notifications!\n`;
+        } else {
+            helpMessage += `🟢 *You are configured and receiving notifications*\n\n`;
+            helpMessage += `*Available Commands:*\n\n`;
+            helpMessage += `📋 /list - View all your YouTrack projects\n`;
+            helpMessage += `➕ /create - Create a new issue\n`;
+            helpMessage += `⏭️ /skip - Skip description when creating an issue\n`;
+            helpMessage += `🔄 /reset - Remove your configuration\n`;
+            helpMessage += `❓ /help - Show this help message\n\n`;
+            helpMessage += `*Creating Issues:*\n`;
+            helpMessage += `1. Use /create to start\n`;
+            helpMessage += `2. Select a project from the list\n`;
+            helpMessage += `3. Enter the issue summary/title\n`;
+            helpMessage += `4. Enter description or use /skip\n\n`;
+            helpMessage += `*Notifications:*\n`;
+            helpMessage += `You'll automatically receive notifications for:\n`;
+            helpMessage += `💬 New comments\n`;
+            helpMessage += `🆕 New issues\n`;
+        }
+
+        helpMessage += `\n*Need More Help?*\n`;
+        helpMessage += `Contact your administrator or check the documentation.`;
+
+        await this.api.sendMessage(chatId, helpMessage, "Markdown");
     }
 }
